@@ -10,6 +10,9 @@
   const status = document.querySelector("#status");
   const content = document.querySelector("#weather-content");
   let pendingCities = [];
+  const addressCache = new Map();
+  let addressQueue = Promise.resolve();
+  let lastAddressRequestAt = 0;
 
   function setStatus(message, isError = false) {
     status.textContent = message;
@@ -72,12 +75,74 @@
     return result;
   }
 
+  async function resolveKoreanAddress(city) {
+    if (city.country !== "KR") return city;
+    const needsAddress = Boolean(city.address_warning)
+      || (/[동리]$/.test(city.name) && (!city.parent || !city.district));
+    if (!needsAddress) return city;
+    const cacheKey = `${Number(city.lat).toFixed(5)},${Number(city.lon).toFixed(5)}`;
+    let address = addressCache.get(cacheKey);
+    if (!address) {
+      const request = addressQueue.then(async () => {
+        const queuedCache = addressCache.get(cacheKey);
+        if (queuedCache) return queuedCache;
+        const delay = 1100 - (Date.now() - lastAddressRequestAt);
+        if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+        lastAddressRequestAt = Date.now();
+        const url = new URL("https://nominatim.openstreetmap.org/reverse");
+        url.search = new URLSearchParams({
+          lat: String(city.lat),
+          lon: String(city.lon),
+          format: "jsonv2",
+          zoom: "18",
+          addressdetails: "1",
+        }).toString();
+        const response = await fetch(url, {
+          headers: { "Accept-Language": "ko" },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!response.ok) throw new Error(`Nominatim returned ${response.status}.`);
+        const result = await response.json();
+        if (!result.address || typeof result.address !== "object") {
+          throw new Error("Nominatim did not return address details.");
+        }
+        const values = result.address;
+        const resolved = {
+          region: values.province || values.state || "",
+          parent: values.city || values.town || values.municipality || "",
+          district: values.borough || values.city_district || values.district || "",
+          administrative_dong: values.suburb || values.city_block || "",
+          legal_dong: values.quarter || values.neighbourhood || "",
+        };
+        addressCache.set(cacheKey, resolved);
+        return resolved;
+      });
+      addressQueue = request.then(() => undefined, () => undefined);
+      try {
+        address = await request;
+      } catch (error) {
+        console.warn("Browser-side Korean address lookup failed.", error);
+        if (!city.address_warning) {
+          city.address_warning = "상세 행정구역 정보를 표시할 수 없어요.";
+        }
+        return city;
+      }
+    }
+    Object.assign(city, address);
+    delete city.address_warning;
+    return city;
+  }
+
   function selectCity(city) {
     picker.hidden = true;
     pickerLabel.hidden = true;
     setBusy(true, `${cityLabel(city)} 날씨를 불러오고 있어요…`);
-    return callWeatherFunction({ action: "weather", lat: city.lat, lon: city.lon })
-      .then((weather) => renderWeather(city, weather))
+    return resolveKoreanAddress(city)
+      .then((resolvedCity) => callWeatherFunction({
+        action: "weather",
+        lat: resolvedCity.lat,
+        lon: resolvedCity.lon
+      }).then((weather) => renderWeather(resolvedCity, weather)))
       .catch((error) => setStatus(error.message, true))
       .finally(() => setBusy(false));
   }

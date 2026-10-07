@@ -133,13 +133,39 @@ async function reverseKoreanAddress(lat: number, lon: number): Promise<Record<st
 
 async function searchCities(query: string): Promise<City[]> {
   const normalized = query.toLocaleLowerCase("ko-KR").trim().replace(/\s+/g, " ");
-  const searchQuery = normalized === "서울"
-    ? "Seoul,KR"
-    : normalized.endsWith("구") || normalized.endsWith("동")
-    ? `${query},KR`
-    : query;
-  const result = await openWeather("/geo/1.0/direct", { q: searchQuery, limit: 5 });
-  const items = Array.isArray(result) ? result as JsonRecord[] : [];
+  const koreanCityAliases: Record<string, string> = {
+    "서울": "Seoul,KR",
+    "서울시": "Seoul,KR",
+    "서울특별시": "Seoul,KR",
+    "부산": "Busan,KR",
+    "부산시": "Busan,KR",
+    "부산광역시": "Busan,KR",
+  };
+  const searchQuery = koreanCityAliases[normalized]
+    ?? (normalized.endsWith("구") || normalized.endsWith("동") || normalized.endsWith("리")
+      ? `${query},KR`
+      : query);
+  let result = await openWeather("/geo/1.0/direct", { q: searchQuery, limit: 5 });
+  let items = Array.isArray(result) ? result as JsonRecord[] : [];
+  const queryParts = query.trim().split(/\s+/);
+  const lastPart = queryParts.at(-1) ?? "";
+  let searchContext = "";
+  if (!items.length && queryParts.length > 1 && /[동리]$/.test(lastPart)) {
+    searchContext = queryParts.slice(0, -1).join(" ");
+    result = await openWeather("/geo/1.0/direct", {
+      q: `${lastPart},KR`,
+      limit: 5,
+    });
+    items = Array.isArray(result) ? result as JsonRecord[] : [];
+  }
+  if (!items.length && /[\uac00-\ud7a3]/.test(lastPart) && !/[구동리]$/.test(lastPart)) {
+    searchContext = queryParts.length > 1 ? queryParts.slice(0, -1).join(" ") : "";
+    result = await openWeather("/geo/1.0/direct", {
+      q: `${lastPart}동,KR`,
+      limit: 5,
+    });
+    items = Array.isArray(result) ? result as JsonRecord[] : [];
+  }
   const cities: City[] = [];
   const exactMatches: City[] = [];
   let reverseGeocodingUnavailable = false;
@@ -158,7 +184,7 @@ async function searchCities(query: string): Promise<City[]> {
     };
     const koreanDong = city.country === "KR"
       && koreanName.endsWith("동")
-      && koreanName.toLocaleLowerCase("ko-KR").includes(normalized);
+      && koreanName.toLocaleLowerCase("ko-KR").includes(lastPart.toLocaleLowerCase("ko-KR"));
     if (city.country === "KR" && (normalized.endsWith("동") || koreanDong)) {
       if (!reverseGeocodingUnavailable) {
         try {
@@ -176,6 +202,13 @@ async function searchCities(query: string): Promise<City[]> {
       }
       if (reverseGeocodingUnavailable && !city.address_warning) {
         city.address_warning = "동 위치는 찾았지만 상세 행정구역 정보를 가져오지 못했어요.";
+      }
+      if (searchContext) {
+        const contextParts = searchContext.split(/\s+/);
+        const contextDistrict = contextParts.find((part) => /[구군]$/.test(part)) ?? "";
+        const contextParent = contextParts.filter((part) => !/[구군]$/.test(part)).join(" ");
+        if (!city.parent) city.parent = contextParent || searchContext;
+        if (!city.district) city.district = contextDistrict;
       }
     } else if (normalized.endsWith("구") && city.country === "KR" && !city.state) {
       const parents = await openWeather("/geo/1.0/reverse", { lat: city.lat, lon: city.lon, limit: 1 });
