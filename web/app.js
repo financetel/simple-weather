@@ -11,6 +11,7 @@
   const content = document.querySelector("#weather-content");
   let pendingCities = [];
   const addressCache = new Map();
+  const localitySearchCache = new Map();
   let addressQueue = Promise.resolve();
   let lastAddressRequestAt = 0;
 
@@ -73,6 +74,74 @@
     }
     if (!response.ok) throw new Error(result.error || "요청을 처리할 수 없어요.");
     return result;
+  }
+
+  async function searchKoreanLocalities(query) {
+    const searchName = query.endsWith("동") ? query : `${query}동`;
+    const cached = localitySearchCache.get(searchName);
+    if (cached) return cached;
+
+    const request = addressQueue.then(async () => {
+      const queuedCache = localitySearchCache.get(searchName);
+      if (queuedCache) return queuedCache;
+      const delay = 1100 - (Date.now() - lastAddressRequestAt);
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+      lastAddressRequestAt = Date.now();
+      const url = new URL("https://nominatim.openstreetmap.org/search");
+      url.search = new URLSearchParams({
+        q: `${searchName}, 대한민국`,
+        format: "jsonv2",
+        addressdetails: "1",
+        countrycodes: "kr",
+        featuretype: "settlement",
+        limit: "10",
+      }).toString();
+      let response;
+      try {
+        response = await fetch(url, {
+          headers: { "Accept-Language": "ko" },
+          signal: AbortSignal.timeout(15000),
+        });
+      } catch {
+        throw new Error("전국 동 이름 검색 서비스에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.");
+      }
+      if (!response.ok) {
+        throw new Error("전국 동 이름 검색에 실패했어요. 잠시 후 다시 시도해 주세요.");
+      }
+      const results = await response.json();
+      if (!Array.isArray(results)) {
+        throw new Error("전국 동 이름 검색에서 올바르지 않은 응답을 받았어요.");
+      }
+      const cities = [];
+      for (const result of results) {
+        const resultType = String(result.type || "");
+        if (!["administrative", "quarter", "legal", "neighbourhood", "suburb"].includes(resultType)) continue;
+        const name = String(result.name || "");
+        if (name.toLocaleLowerCase("ko-KR").trim() !== searchName.toLocaleLowerCase("ko-KR")) continue;
+        const values = result.address && typeof result.address === "object" ? result.address : {};
+        const lat = Number(result.lat);
+        const lon = Number(result.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        if (cities.some((city) => Math.abs(city.lat - lat) < 0.002
+          && Math.abs(city.lon - lon) < 0.002)) continue;
+        cities.push({
+          name,
+          country: String(values.country_code || "kr").toUpperCase(),
+          state: "",
+          lat,
+          lon,
+          region: values.province || values.state || "",
+          parent: values.city || values.town || values.municipality || "",
+          district: values.borough || values.city_district || values.district || "",
+          administrative_dong: values.suburb || values.city_block || "",
+          legal_dong: values.quarter || values.neighbourhood || values.legal || "",
+        });
+      }
+      localitySearchCache.set(searchName, cities);
+      return cities;
+    });
+    addressQueue = request.then(() => undefined, () => undefined);
+    return request;
   }
 
   async function resolveKoreanAddress(city) {
@@ -152,7 +221,16 @@
     pickerLabel.hidden = true;
     content.replaceChildren();
     setBusy(true, `‘${query}’ 위치를 찾고 있어요…`);
-    callWeatherFunction({ action: "search", query })
+    const normalized = query.toLocaleLowerCase("ko-KR").trim().replace(/\s+/g, " ");
+    const cityAliases = new Set(["서울", "서울시", "서울특별시", "부산", "부산시", "부산광역시"]);
+    const searchRequest = /^[\uac00-\ud7a3]{2,}$/.test(normalized)
+      && !/[구군시도읍면리]$/.test(normalized)
+      && !cityAliases.has(normalized)
+      ? searchKoreanLocalities(normalized).then((cities) => (
+        cities.length ? { cities } : callWeatherFunction({ action: "search", query })
+      ))
+      : callWeatherFunction({ action: "search", query });
+    searchRequest
       .then(({ cities }) => {
         pendingCities = Array.isArray(cities) ? cities : [];
         if (!pendingCities.length) {
