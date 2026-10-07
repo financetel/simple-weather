@@ -12,6 +12,7 @@
   let pendingCities = [];
   const addressCache = new Map();
   const localitySearchCache = new Map();
+  const regionSearchCache = new Map();
   let addressQueue = Promise.resolve();
   let lastAddressRequestAt = 0;
 
@@ -144,6 +145,67 @@
     return request;
   }
 
+  async function searchKoreanRegion(query) {
+    const regionName = query === "경남" ? "경상남도" : query;
+    const cached = regionSearchCache.get(regionName);
+    if (cached) return cached;
+
+    const request = addressQueue.then(async () => {
+      const queuedCache = regionSearchCache.get(regionName);
+      if (queuedCache) return queuedCache;
+      const delay = 1100 - (Date.now() - lastAddressRequestAt);
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+      lastAddressRequestAt = Date.now();
+      const url = new URL("https://nominatim.openstreetmap.org/search");
+      url.search = new URLSearchParams({
+        q: `${regionName}, 대한민국`,
+        format: "jsonv2",
+        addressdetails: "1",
+        countrycodes: "kr",
+        limit: "5",
+      }).toString();
+      let response;
+      try {
+        response = await fetch(url, {
+          headers: { "Accept-Language": "ko" },
+          signal: AbortSignal.timeout(15000),
+        });
+      } catch {
+        throw new Error("대한민국 행정구역 검색 서비스에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.");
+      }
+      if (!response.ok) {
+        throw new Error("대한민국 행정구역 검색에 실패했어요. 잠시 후 다시 시도해 주세요.");
+      }
+      const results = await response.json();
+      if (!Array.isArray(results)) {
+        throw new Error("행정구역 검색에서 올바르지 않은 응답을 받았어요.");
+      }
+      const cities = results.flatMap((result) => {
+        const values = result.address && typeof result.address === "object" ? result.address : {};
+        const name = String(result.name || "");
+        const lat = Number(result.lat);
+        const lon = Number(result.lon);
+        if (String(result.type || "") !== "administrative"
+          || name !== regionName
+          || String(values.country_code || "").toLowerCase() !== "kr"
+          || !Number.isFinite(lat)
+          || !Number.isFinite(lon)) return [];
+        return [{
+          name: regionName,
+          country: "KR",
+          state: "",
+          lat,
+          lon,
+          region: regionName,
+        }];
+      });
+      regionSearchCache.set(regionName, cities);
+      return cities;
+    });
+    addressQueue = request.then(() => undefined, () => undefined);
+    return request;
+  }
+
   async function resolveKoreanAddress(city) {
     if (city.country !== "KR") return city;
     const needsAddress = Boolean(city.address_warning)
@@ -223,13 +285,15 @@
     setBusy(true, `‘${query}’ 위치를 찾고 있어요…`);
     const normalized = query.toLocaleLowerCase("ko-KR").trim().replace(/\s+/g, " ");
     const cityAliases = new Set(["서울", "서울시", "서울특별시", "부산", "부산시", "부산광역시"]);
-    const searchRequest = /^[\uac00-\ud7a3]{2,}$/.test(normalized)
-      && !/[구군시도읍면리]$/.test(normalized)
-      && !cityAliases.has(normalized)
-      ? searchKoreanLocalities(normalized).then((cities) => (
-        cities.length ? { cities } : callWeatherFunction({ action: "search", query })
-      ))
-      : callWeatherFunction({ action: "search", query });
+    const searchRequest = ["경남", "경상남도"].includes(normalized)
+      ? searchKoreanRegion(normalized).then((cities) => ({ cities }))
+      : /^[\uac00-\ud7a3]{2,}$/.test(normalized)
+        && !/[구군시도읍면리]$/.test(normalized)
+        && !cityAliases.has(normalized)
+        ? searchKoreanLocalities(normalized).then((cities) => (
+          cities.length ? { cities } : callWeatherFunction({ action: "search", query })
+        ))
+        : callWeatherFunction({ action: "search", query });
     searchRequest
       .then(({ cities }) => {
         pendingCities = Array.isArray(cities) ? cities : [];
