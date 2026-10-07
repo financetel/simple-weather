@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#eef7fc">
+    <meta name="description" content="도시와 동네별 현재 날씨와 5일 예보를 확인하세요.">
+    <title>SimpleWeather · 오늘의 날씨</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./config.js"></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="SimpleWeather 홈">
+          <span class="brand-mark" aria-hidden="true">☀</span>
+          <span>SIMPLE WEATHER</span>
+        </a>
+        <span class="topbar-note">지금 필요한 날씨를 한눈에</span>
+      </header>
+
+      <section class="search-panel" aria-labelledby="page-title">
+        <div class="eyebrow">YOUR LOCAL FORECAST</div>
+        <h1 id="page-title">오늘 날씨가 궁금한가요?</h1>
+        <p class="intro">도시부터 동네까지 검색하고, 5일 예보를 확인해 보세요.</p>
+        <form id="search-form" class="search-form">
+          <label class="visually-hidden" for="city-query">도시 또는 동네 이름</label>
+          <input id="city-query" name="query" type="search" maxlength="80"
+                 placeholder="도시·구·동·리 검색  예: 서울, 해운대구, 역삼동"
+                 autocomplete="off" required>
+          <button id="search-button" type="submit"><span aria-hidden="true">⌕</span> 검색</button>
+        </form>
+        <label id="city-picker-label" class="picker-label" for="city-picker" hidden>검색 결과에서 위치 선택</label>
+        <select id="city-picker" class="city-picker" hidden></select>
+        <p id="status" class="status" role="status" aria-live="polite">도시를 검색해 현재 날씨와 예보를 확인해 보세요.</p>
+      </section>
+
+      <section id="weather-content" class="weather-content" aria-live="polite"></section>
+
+      <footer class="footer">
+        <span>날씨 데이터: OpenWeather</span>
+        <span>동 단위 행정구역 자료: © OpenStreetMap contributors</span>
+      </footer>
+    </main>
+  </body>
+</html>
