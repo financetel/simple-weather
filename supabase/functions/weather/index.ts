@@ -1,5 +1,6 @@
 const OPENWEATHER_BASE = "https://api.openweathermap.org";
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse";
+const NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search";
 const REQUEST_TIMEOUT_MS = 15_000;
 const NOMINATIM_MIN_INTERVAL_MS = 1_100;
 
@@ -20,6 +21,7 @@ type City = {
 type JsonRecord = Record<string, unknown>;
 
 const addressCache = new Map<string, Record<string, string>>();
+const localitySearchCache = new Map<string, City[]>();
 let lastNominatimRequestAt = 0;
 let nominatimQueue: Promise<void> = Promise.resolve();
 
@@ -131,6 +133,75 @@ async function reverseKoreanAddress(lat: number, lon: number): Promise<Record<st
   return task;
 }
 
+async function searchKoreanLocalities(query: string): Promise<City[]> {
+  const searchName = query.endsWith("동") ? query : `${query}동`;
+  const cached = localitySearchCache.get(searchName);
+  if (cached) return cached;
+
+  const task = nominatimQueue.then(async () => {
+    const queuedCache = localitySearchCache.get(searchName);
+    if (queuedCache) return queuedCache;
+    const delay = NOMINATIM_MIN_INTERVAL_MS - (Date.now() - lastNominatimRequestAt);
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    lastNominatimRequestAt = Date.now();
+
+    const url = new URL(NOMINATIM_SEARCH_URL);
+    url.search = new URLSearchParams({
+      q: `${searchName}, 대한민국`,
+      format: "jsonv2",
+      addressdetails: "1",
+      countrycodes: "kr",
+      featuretype: "settlement",
+      limit: "10",
+    }).toString();
+    const response = await fetch(url, {
+      headers: {
+        "Accept-Language": "ko",
+        "User-Agent": "SimpleWeather/1.0 (Korean locality search)",
+      },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`Nominatim returned ${response.status}.`);
+
+    const payload: unknown = await response.json();
+    if (!Array.isArray(payload)) throw new Error("Nominatim returned an invalid search response.");
+    const cities: City[] = [];
+    for (const value of payload) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const item = value as JsonRecord;
+      const type = String(item.type || "");
+      if (!["administrative", "quarter", "legal", "neighbourhood", "suburb"].includes(type)) continue;
+      const name = String(item.name || "");
+      if (name.toLocaleLowerCase("ko-KR").trim() !== searchName.toLocaleLowerCase("ko-KR")) continue;
+      const address = item.address && typeof item.address === "object"
+        ? item.address as Record<string, string>
+        : {};
+      const lat = Number(item.lat);
+      const lon = Number(item.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      const duplicate = cities.some((city) => Math.abs(city.lat - lat) < 0.002
+        && Math.abs(city.lon - lon) < 0.002);
+      if (duplicate) continue;
+      cities.push({
+        name,
+        country: String(address.country_code || "kr").toUpperCase(),
+        state: "",
+        lat,
+        lon,
+        region: address.province || address.state || "",
+        parent: address.city || address.town || address.municipality || "",
+        district: address.borough || address.city_district || address.district || "",
+        administrative_dong: address.suburb || address.city_block || "",
+        legal_dong: address.quarter || address.neighbourhood || address.legal || "",
+      });
+    }
+    localitySearchCache.set(searchName, cities);
+    return cities;
+  });
+  nominatimQueue = task.then(() => undefined, () => undefined);
+  return task;
+}
+
 async function searchCities(query: string): Promise<City[]> {
   const normalized = query.toLocaleLowerCase("ko-KR").trim().replace(/\s+/g, " ");
   const koreanCityAliases: Record<string, string> = {
@@ -141,6 +212,25 @@ async function searchCities(query: string): Promise<City[]> {
     "부산시": "Busan,KR",
     "부산광역시": "Busan,KR",
   };
+  const koreanCityNames: Record<string, string> = {
+    "서울": "서울특별시",
+    "서울시": "서울특별시",
+    "서울특별시": "서울특별시",
+    "부산": "부산광역시",
+    "부산시": "부산광역시",
+    "부산광역시": "부산광역시",
+  };
+  if (/^[\uac00-\ud7a3]{2,}$/.test(normalized)
+    && !/[구군시도읍면리]$/.test(normalized)
+    && !koreanCityAliases[normalized]) {
+    try {
+      const localities = await searchKoreanLocalities(normalized);
+      if (localities.length) return localities;
+    } catch (error) {
+      console.warn("Korean locality search failed.", error);
+      throw new Error("전국 동 이름 검색에 실패했어요. 잠시 후 다시 시도해 주세요.");
+    }
+  }
   const searchQuery = koreanCityAliases[normalized]
     ?? (normalized.endsWith("구") || normalized.endsWith("동") || normalized.endsWith("리")
       ? `${query},KR`
@@ -176,7 +266,7 @@ async function searchCities(query: string): Promise<City[]> {
       : {};
     const koreanName = localNames.ko || "";
     const city: City = {
-      name: koreanName || String(item.name || ""),
+      name: koreanCityNames[normalized] || koreanName || String(item.name || ""),
       country: String(item.country || ""),
       state: String(item.state || ""),
       lat: Number(item.lat),
