@@ -6,9 +6,10 @@
     <meta name="theme-color" content="#eef7fc">
     <meta name="description" content="도시와 동네별 현재 날씨와 5일 예보를 확인하세요.">
     <title>SimpleWeather · 오늘의 날씨</title>
-    <link rel="stylesheet" href="./styles.css?v=3">
-    <script src="./config.js?v=3"></script>
-    <script src="./app.js?v=3" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=4">
+    <script src="./config.js?v=4"></script>
+    <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+    <script src="./app.js?v=4" defer></script>
   </head>
   <body>
     <main class="page-shell">
@@ -23,17 +24,25 @@
       <section class="search-panel" aria-labelledby="page-title">
         <div class="eyebrow">YOUR LOCAL FORECAST</div>
         <h1 id="page-title">오늘 날씨가 궁금한가요?</h1>
-        <p class="intro">도시부터 동네까지 검색하고, 5일 예보를 확인해 보세요.</p>
+        <p class="intro">대한민국 주소를 찾고, 해당 지역의 현재 날씨와 5일 예보를 확인해 보세요.</p>
+        <div class="address-fields">
+          <div class="address-row">
+            <label class="visually-hidden" for="postcode">우편번호</label>
+            <input id="postcode" type="text" placeholder="우편번호" readonly>
+            <button id="address-search-button" type="button">주소 검색</button>
+          </div>
+          <label class="visually-hidden" for="city-query">도로명 주소</label>
+          <input id="city-query" type="text" maxlength="100" placeholder="주소 검색 버튼을 눌러 주소를 선택해 주세요." readonly required>
+          <label class="visually-hidden" for="detail-address">상세주소 (선택)</label>
+          <input id="detail-address" type="text" maxlength="100" placeholder="상세주소 (선택)">
+        </div>
         <form id="search-form" class="search-form">
-          <label class="visually-hidden" for="city-query">도시 또는 동네 이름</label>
-          <input id="city-query" name="query" type="search" maxlength="80"
-                 placeholder="도시·구·동·리 검색  예: 서울, 해운대구, 역삼동"
-                 autocomplete="off" required>
-          <button id="search-button" type="submit"><span aria-hidden="true">⌕</span> 검색</button>
+          <button id="search-button" type="submit">선택한 주소 날씨 확인</button>
         </form>
+        <p class="address-note">선택한 주소의 행정구역을 기준으로 날씨를 표시합니다. 상세주소는 날씨 위치에 반영되지 않습니다.</p>
         <label id="city-picker-label" class="picker-label" for="city-picker" hidden>검색 결과에서 위치 선택</label>
         <select id="city-picker" class="city-picker" hidden></select>
-        <p id="status" class="status" role="status" aria-live="polite">도시를 검색해 현재 날씨와 예보를 확인해 보세요.</p>
+        <p id="status" class="status" role="status" aria-live="polite">주소를 검색해 해당 지역의 날씨와 예보를 확인해 보세요.</p>
       </section>
 
       <section id="weather-content" class="weather-content" aria-live="polite"></section>

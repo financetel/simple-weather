@@ -61,8 +61,9 @@ button { cursor: pointer; }
 h1 { margin: 12px 0 8px; color: #123d5c; font-size: clamp(27px, 4vw, 40px); letter-spacing: -.04em; }
 .intro { margin: 0; color: var(--muted); }
 
-.search-form { display: flex; gap: 10px; margin-top: 26px; }
-.search-form input, .city-picker {
+.address-fields { display: grid; gap: 10px; margin-top: 26px; }
+.address-row { display: flex; gap: 10px; }
+.address-fields input, .city-picker {
   width: 100%;
   min-width: 0;
   min-height: 54px;
@@ -73,20 +74,25 @@ h1 { margin: 12px 0 8px; color: #123d5c; font-size: clamp(27px, 4vw, 40px); lett
   background: #fff;
   color: #15324b;
 }
-.search-form input:focus, .city-picker:focus { border-color: #1680b3; box-shadow: 0 0 0 3px rgba(22,128,179,.12); }
-.search-form button {
+.address-fields input:focus, .city-picker:focus { border-color: #1680b3; box-shadow: 0 0 0 3px rgba(22,128,179,.12); }
+.address-row input { flex: 0 0 130px; }
+.address-row button, .search-form button {
   flex: 0 0 auto;
-  min-width: 116px;
+  min-height: 54px;
+  padding: 0 20px;
   border: 0;
   border-radius: 14px;
   background: var(--blue);
   color: white;
   font-weight: 750;
 }
-.search-form button:hover { background: #064d78; }
-.search-form button:disabled { cursor: wait; opacity: .6; }
-.search-form button span { margin-right: 5px; font-size: 20px; vertical-align: -1px; }
+.address-row button:hover, .search-form button:hover { background: #064d78; }
+.address-row button:disabled, .search-form button:disabled { cursor: wait; opacity: .6; }
+.search-form { display: flex; margin-top: 12px; }
+.search-form button { width: 100%; }
+.address-note { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .picker-label { display: block; margin: 16px 0 7px; color: #31566e; font-size: 14px; font-weight: 700; }
+.picker-label[hidden], .city-picker[hidden] { display: none; }
 .city-picker { margin-top: 16px; }
 .status { min-height: 22px; margin: 17px 0 0; color: var(--muted); font-size: 14px; }
 .status[data-error="true"] { color: #a33b22; }
@@ -147,8 +153,8 @@ h1 { margin: 12px 0 8px; color: #123d5c; font-size: clamp(27px, 4vw, 40px); lett
   .page-shell { width: min(100% - 24px, 560px); }
   .topbar { min-height: 62px; }
   .topbar-note { font-size: 11px; }
-  .search-form { flex-direction: column; }
-  .search-form button { min-height: 50px; }
+  .address-row input { flex-basis: 110px; }
+  .address-row button, .search-form button { min-height: 50px; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .daily-card { grid-template-columns: 1fr auto auto; gap: 9px; }
   .daily-date { grid-column: 1; }

@@ -4,12 +4,16 @@
   const config = window.APP_CONFIG || {};
   const form = document.querySelector("#search-form");
   const queryInput = document.querySelector("#city-query");
+  const postcodeInput = document.querySelector("#postcode");
+  const detailAddressInput = document.querySelector("#detail-address");
+  const addressSearchButton = document.querySelector("#address-search-button");
   const searchButton = document.querySelector("#search-button");
   const picker = document.querySelector("#city-picker");
   const pickerLabel = document.querySelector("#city-picker-label");
   const status = document.querySelector("#status");
   const content = document.querySelector("#weather-content");
   let pendingCities = [];
+  let selectedAddress = null;
   const addressCache = new Map();
   let addressQueue = Promise.resolve();
   let lastAddressRequestAt = 0;
@@ -22,6 +26,9 @@
   function setBusy(busy, message = "") {
     searchButton.disabled = busy;
     queryInput.disabled = busy;
+    postcodeInput.disabled = busy;
+    detailAddressInput.disabled = busy;
+    addressSearchButton.disabled = busy;
     if (message) setStatus(message);
   }
 
@@ -176,6 +183,33 @@
       .finally(() => setBusy(false));
   }
 
+  function addressSearchQuery(address) {
+    const locality = [address.sido, address.sigungu, address.bname || address.hname]
+      .filter((part, index, parts) => part && parts.indexOf(part) === index)
+      .join(" ");
+    return locality || address.jibunAddress || address.roadAddress;
+  }
+
+  function openAddressSearch() {
+    if (!window.daum?.Postcode) {
+      setStatus("주소 검색 서비스를 불러오지 못했어요. 페이지를 새로고침한 뒤 다시 시도해 주세요.", true);
+      return;
+    }
+    new window.daum.Postcode({
+      oncomplete(address) {
+        selectedAddress = address;
+        postcodeInput.value = address.zonecode || "";
+        queryInput.value = address.roadAddress || address.jibunAddress || "";
+        detailAddressInput.value = "";
+        detailAddressInput.focus();
+        picker.hidden = true;
+        pickerLabel.hidden = true;
+        content.replaceChildren();
+        setStatus("주소를 선택했어요. 상세주소를 입력한 뒤 날씨를 확인해 주세요.");
+      }
+    }).open();
+  }
+
   function localDate(timestamp, offsetSeconds, options) {
     const local = new Date((Number(timestamp) + offsetSeconds) * 1000);
     return new Intl.DateTimeFormat("ko-KR", { ...options, timeZone: "UTC" }).format(local);
@@ -310,14 +344,15 @@
     content.append(list);
   }
 
+  addressSearchButton.addEventListener("click", openAddressSearch);
+
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const query = queryInput.value.trim();
-    if (!query) {
-      setStatus("먼저 도시 또는 동네 이름을 입력해 주세요.", true);
+    if (!selectedAddress) {
+      setStatus("먼저 주소 검색 버튼에서 주소를 선택해 주세요.", true);
       return;
     }
-    searchCities(query);
+    searchCities(addressSearchQuery(selectedAddress));
   });
 
   picker.addEventListener("change", () => {

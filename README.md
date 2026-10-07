@@ -1,6 +1,6 @@
 # SimpleWeather 웹 앱
 
-도시와 동네를 검색해 현재 날씨와 5일 예보를 확인하는 한국어 웹 앱입니다.
+대한민국 주소를 선택해 해당 지역의 현재 날씨와 5일 예보를 확인하는 한국어 웹 앱입니다.
 
 ## 구성
 
@@ -40,6 +40,8 @@ GitHub 저장소의 **Settings → Secrets and variables → Actions**에서 설
 
 ## 검색 및 데이터 출처
 
-도시와 동 이름을 검색할 수 있습니다. `역삼`처럼 동 이름 일부를 입력하면 동 이름으로 보완해 검색하며, `부산`은 한국의 부산광역시로 처리합니다. 한국 동 단위 주소에는 OpenStreetMap의 행정구역 정보가 사용될 수 있습니다. OpenStreetMap 데이터는 © OpenStreetMap contributors, ODbL에 따라 제공됩니다.
+주소 검색은 Daum 우편번호 서비스를 사용합니다. 선택한 주소의 시·구·동 행정구역으로 날씨 위치를 찾으므로, 상세주소는 좌표 조회에 사용되지 않습니다. 우편번호 검색 서비스는 외부 CDN에서 불러옵니다.
+
+한국 동 단위 주소에는 OpenStreetMap의 행정구역 정보가 사용될 수 있습니다. OpenStreetMap 데이터는 © OpenStreetMap contributors, ODbL에 따라 제공됩니다.
 
 날씨 데이터는 OpenWeather에서 제공합니다. 무료 예보는 3시간 간격 5일 예보이며, 자외선 지수와 공식 기상특보는 포함되지 않습니다.
