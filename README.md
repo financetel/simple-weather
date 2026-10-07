@@ -36,28 +36,23 @@
 
 현재 화면의 UV 지수와 공식 기상특보는 무료 API에 포함되지 않아 표시하지 않습니다. 날씨 설명은 선택한 도시의 시간대와 섭씨 단위로 보여줍니다.
 
-## 웹 버전 배포 (financetel GitHub Pages + 별도 Supabase 프로젝트)
+## 웹 버전 배포 (financetel GitHub Pages + 기존 Supabase 프로젝트)
 
 브라우저 웹 버전은 `web/`에 있고, `supabase/functions/weather/`의 Edge Function이 OpenWeather 요청을 중계합니다. OpenWeather API 키는 Supabase의 서버 측 Secret에만 저장하며, 프런트엔드에는 공개용 Supabase URL과 anon key만 전달됩니다.
 
-1. 기존 게시판 Supabase 프로젝트가 아닌 새 Supabase 프로젝트를 만들고 프로젝트 URL, legacy anon key (JWT 형식), project ref를 확인합니다. Edge Function의 JWT 검증을 사용하므로 publishable key 대신 anon key를 사용합니다.
-2. Supabase Dashboard의 Edge Functions Secrets에 다음 값을 설정합니다.
+1. 이미 사용 중인 게시판 Supabase 프로젝트를 재사용합니다. 이 기능은 기존 테이블이나 Storage를 변경하지 않고 `weather` Edge Function만 배포합니다. 이 프로젝트의 Project URL, Project ref, `sb_publishable_...` 형태의 publishable key를 확인합니다.
+2. GitHub 저장소 `financetel/simple-weather`의 **Settings → Secrets and variables → Actions**에서 다음 **Variables**를 만듭니다.
+   - `SUPABASE_URL`: 기존 프로젝트의 Project URL
+   - `SUPABASE_API_KEY`: 기존 프로젝트의 publishable key
+3. 같은 곳에서 다음 **Repository secrets**를 만듭니다.
+   - `SUPABASE_ACCESS_TOKEN`: Supabase Dashboard → Account → Access Tokens에서 만든 개인 액세스 토큰
    - `OPENWEATHER_API_KEY`: OpenWeather API 키
-   - `ALLOWED_ORIGINS`: `https://financetel.github.io` (커스텀 도메인을 쓰면 그 도메인도 쉼표로 추가)
-3. Supabase CLI로 함수 배포:
+4. **Variables**에 `SUPABASE_PROJECT_REF`를 추가합니다. 기존 프로젝트의 Project ref를 사용합니다.
+5. 저장소 **Settings → Pages → Build and deployment → Source**를 **GitHub Actions**로 설정합니다. GitHub Actions가 웹사이트를 `https://financetel.github.io/simple-weather/`에 배포합니다.
+6. 저장소의 **Actions → Deploy weather function to Supabase → Run workflow**를 실행합니다. 이후 `supabase/` 변경을 `main`에 푸시하면 함수가 자동 재배포됩니다.
 
-   ```powershell
-   supabase login
-   supabase link --project-ref <project-ref>
-   supabase functions deploy weather
-   ```
-
-4. 이 프로젝트를 새 GitHub 저장소 `financetel/simple-weather`의 `main` 브랜치에 올리고, 저장소 **Settings → Pages → Build and deployment → Source**를 **GitHub Actions**로 설정합니다.
-5. 저장소 **Settings → Secrets and variables → Actions → Variables**에 `SUPABASE_URL`과 `SUPABASE_ANON_KEY`를 추가합니다. GitHub Actions가 이 공개 클라이언트 설정을 배포 파일에 생성합니다. anon key는 공개 클라이언트 키이며, `OPENWEATHER_API_KEY`는 여기에 넣지 않습니다.
-6. `web/` 또는 배포 워크플로 변경을 `main`에 푸시하면 GitHub Pages 배포가 실행됩니다.
-
-배포 URL은 `https://financetel.github.io/simple-weather/`이고 브라우저 요청 origin은 `https://financetel.github.io`입니다. 설정된 origin이 실제 사이트와 일치하지 않으면 브라우저 요청이 거부됩니다.
+웹 프런트엔드는 `web/` 변경을 `main`에 푸시할 때 자동 배포됩니다. Supabase 함수는 `supabase/` 변경 또는 수동 실행 때 자동 배포됩니다.
 
 이 앱은 검색·날씨 결과를 저장하지 않아 별도 DB 테이블은 만들지 않습니다. Supabase Postgres는 프로젝트에 포함되지만 앱 요청은 Edge Function을 통해 OpenWeather로 전달됩니다.
 
-공개 웹사이트의 Supabase Edge Function은 방문자가 호출할 수 있으므로 OpenWeather 사용량 한도를 확인하고 키별 호출 한도를 관리하세요. 브라우저 설정에 포함된 anon key는 공개 클라이언트 키이며, OpenWeather API 키와는 다릅니다.
+`weather` 함수는 비로그인 공개 웹사이트에서 호출할 수 있도록 JWT 검증을 끄고, `https://financetel.github.io`의 브라우저 origin만 CORS로 허용합니다. CORS는 API 키가 아니므로 공개 엔드포인트를 완전히 보호하지는 않습니다. OpenWeather 사용량 한도를 확인하고, 필요하면 별도의 요청 제한을 추가하세요. `SUPABASE_API_KEY`는 브라우저에 노출되는 publishable key이며 OpenWeather API 키와 Supabase 개인 액세스 토큰은 반드시 비밀로 유지합니다.

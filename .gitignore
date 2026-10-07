@@ -6,3 +6,4 @@ dist/
 *.spec
 .env
 build_key.py
+supabase/.temp/

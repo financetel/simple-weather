@@ -42,8 +42,8 @@
 
   async function callWeatherFunction(payload) {
     const baseUrl = String(config.supabaseUrl || "").replace(/\/+$/, "");
-    const anonKey = String(config.supabaseAnonKey || "");
-    if (!baseUrl || !anonKey) {
+    const apiKey = String(config.supabaseApiKey || "");
+    if (!baseUrl || !apiKey) {
       throw new Error("Supabase 설정이 아직 연결되지 않았어요. 배포 설정을 확인해 주세요.");
     }
     let response;
@@ -52,8 +52,8 @@
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`
+          apikey: apiKey,
+          Authorization: `Bearer ${apiKey}`
         },
         body: JSON.stringify(payload)
       });
