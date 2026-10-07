@@ -14,6 +14,7 @@ type City = {
   district?: string;
   administrative_dong?: string;
   legal_dong?: string;
+  address_warning?: string;
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -141,6 +142,7 @@ async function searchCities(query: string): Promise<City[]> {
   const items = Array.isArray(result) ? result as JsonRecord[] : [];
   const cities: City[] = [];
   const exactMatches: City[] = [];
+  let reverseGeocodingUnavailable = false;
 
   for (const item of items) {
     const localNames = (item.local_names && typeof item.local_names === "object")
@@ -158,12 +160,23 @@ async function searchCities(query: string): Promise<City[]> {
       && koreanName.endsWith("동")
       && koreanName.toLocaleLowerCase("ko-KR").includes(normalized);
     if (city.country === "KR" && (normalized.endsWith("동") || koreanDong)) {
-      const address = await reverseKoreanAddress(city.lat, city.lon);
-      city.region = address.region;
-      city.parent = address.city;
-      city.district = address.district;
-      city.administrative_dong = address.administrative_dong;
-      city.legal_dong = address.legal_dong;
+      if (!reverseGeocodingUnavailable) {
+        try {
+          const address = await reverseKoreanAddress(city.lat, city.lon);
+          city.region = address.region;
+          city.parent = address.city;
+          city.district = address.district;
+          city.administrative_dong = address.administrative_dong;
+          city.legal_dong = address.legal_dong;
+        } catch (error) {
+          reverseGeocodingUnavailable = true;
+          city.address_warning = "동 위치는 찾았지만 상세 행정구역 정보를 가져오지 못했어요.";
+          console.warn("Korean reverse geocoding failed; returning the OpenWeather result.", error);
+        }
+      }
+      if (reverseGeocodingUnavailable && !city.address_warning) {
+        city.address_warning = "동 위치는 찾았지만 상세 행정구역 정보를 가져오지 못했어요.";
+      }
     } else if (normalized.endsWith("구") && city.country === "KR" && !city.state) {
       const parents = await openWeather("/geo/1.0/reverse", { lat: city.lat, lon: city.lon, limit: 1 });
       if (Array.isArray(parents) && parents[0]) {

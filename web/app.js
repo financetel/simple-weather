@@ -37,7 +37,8 @@
       return [...new Map(parts.map((part) => [part.toLocaleLowerCase("ko-KR").replace(/\s+/g, " ").trim(), part])).values()].join(" ");
     }
     if (city.parent && city.country === "KR") return `${city.parent} ${city.name}, 대한민국`;
-    return [city.name, city.state, city.country].filter(Boolean).join(", ");
+    const country = city.country === "KR" ? "대한민국" : city.country;
+    return [city.name, city.state, country].filter(Boolean).join(", ");
   }
 
   async function callWeatherFunction(payload) {
@@ -146,6 +147,9 @@
       el("h2", "weather-location", cityLabel(city)),
       el("p", "weather-stamp", `${localDate(current.dt, offset, { year: "numeric", month: "long", day: "numeric", weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })} 기준`)
     );
+    if (city.address_warning) {
+      hero.append(el("p", "weather-stamp", city.address_warning));
+    }
     const line = el("div", "current-line");
     line.append(
       el("span", "weather-icon", weatherEmoji(weather)),
