@@ -9,6 +9,7 @@ type City = {
   state: string;
   lat: number;
   lon: number;
+  address?: string;
   parent?: string;
   region?: string;
   district?: string;
@@ -46,6 +47,130 @@ function corsFor(request: Request): HeadersInit | null {
     "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
+  };
+}
+
+function mapsConfigured(): boolean {
+  return Boolean(Deno.env.get("NCP_MAPS_API_KEY_ID") && Deno.env.get("NCP_MAPS_API_KEY"));
+}
+
+async function naverMaps(path: string, params: Record<string, string>): Promise<JsonRecord> {
+  const keyId = Deno.env.get("NCP_MAPS_API_KEY_ID");
+  const key = Deno.env.get("NCP_MAPS_API_KEY");
+  if (!keyId || !key) throw new Error("네이버 지도 API 키가 설정되지 않았어요.");
+
+  const url = new URL(`https://maps.apigw.ntruss.com${path}`);
+  for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        "x-ncp-apigw-api-key-id": keyId,
+        "x-ncp-apigw-api-key": key,
+      },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new Error("네이버 지도 주소 서비스에 연결할 수 없어요.");
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error("네이버 지도 주소 서비스에서 올바르지 않은 응답을 받았어요.");
+  }
+  if (!response.ok) {
+    console.error("Naver Maps request failed.", response.status);
+    throw new Error("네이버 지도 주소를 가져오지 못했어요. API 키와 Maps 사용 권한을 확인해 주세요.");
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("네이버 지도 주소 서비스에서 올바르지 않은 응답을 받았어요.");
+  }
+  return payload as JsonRecord;
+}
+
+function addressElements(address: JsonRecord): Map<string, string> {
+  const elements = Array.isArray(address.addressElements) ? address.addressElements : [];
+  const values = new Map<string, string>();
+  for (const item of elements) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const element = item as JsonRecord;
+    const types = Array.isArray(element.types) ? element.types : [];
+    const name = typeof element.longName === "string" ? element.longName : "";
+    for (const type of types) {
+      if (typeof type === "string" && name) values.set(type, name);
+    }
+  }
+  return values;
+}
+
+function splitSigugun(value: string): { parent: string; district: string } {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  if (parts.length > 1) return { parent: parts[0], district: parts.slice(1).join(" ") };
+  return { parent: "", district: parts[0] ?? "" };
+}
+
+async function geocodeKoreanAddress(query: string): Promise<City[]> {
+  const payload = await naverMaps("/map-geocode/v2/geocode", {
+    query,
+    language: "kor",
+    count: "10",
+  });
+  const addresses = Array.isArray(payload.addresses) ? payload.addresses : [];
+  const cities: City[] = [];
+  for (const item of addresses) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const address = item as JsonRecord;
+    const lat = Number(address.y);
+    const lon = Number(address.x);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
+    const elements = addressElements(address);
+    const sigugun = splitSigugun(elements.get("SIGUGUN") ?? "");
+    const dong = elements.get("DONGMYUN") || elements.get("RI") || "";
+    cities.push({
+      name: dong || String(address.roadAddress || address.jibunAddress || query),
+      address: String(address.roadAddress || address.jibunAddress || ""),
+      country: "KR",
+      state: "",
+      lat,
+      lon,
+      region: elements.get("SIDO") ?? "",
+      parent: sigugun.parent,
+      district: sigugun.district,
+      legal_dong: dong,
+    });
+  }
+  return cities;
+}
+
+function reverseAddressFields(payload: JsonRecord): Record<string, string> {
+  const results = Array.isArray(payload.results) ? payload.results : [];
+  const result = results.find((item) => item && typeof item === "object"
+    && !Array.isArray(item) && (item as JsonRecord).name === "legalcode")
+    ?? results.find((item) => item && typeof item === "object"
+      && !Array.isArray(item) && (item as JsonRecord).name === "admcode")
+    ?? results[0];
+  if (!result || typeof result !== "object" || Array.isArray(result)) return {};
+  const region = (result as JsonRecord).region;
+  if (!region || typeof region !== "object" || Array.isArray(region)) return {};
+  const areas = region as JsonRecord;
+  const areaName = (index: number): string => {
+    const area = areas[`area${index}`];
+    if (!area || typeof area !== "object" || Array.isArray(area)) return "";
+    const name = (area as JsonRecord).name;
+    return typeof name === "string" ? name : "";
+  };
+  const sigugun = splitSigugun(areaName(2));
+  const legalDong = areaName(3) || areaName(4);
+  return {
+    region: areaName(1),
+    parent: sigugun.parent,
+    district: sigugun.district,
+    administrative_dong: areaName(3),
+    legal_dong: legalDong,
   };
 }
 
@@ -259,6 +384,27 @@ Deno.serve(async (request) => {
   }
 
   try {
+    if (body.action === "map-geocode") {
+      const query = typeof body.query === "string" ? body.query.trim() : "";
+      if (!query || query.length > 80) {
+        return jsonResponse({ error: "검색어를 1~80자로 입력해 주세요." }, 400, corsHeaders);
+      }
+      if (!mapsConfigured()) return jsonResponse({ available: false }, 200, corsHeaders);
+      return jsonResponse({ available: true, cities: await geocodeKoreanAddress(query) }, 200, corsHeaders);
+    }
+    if (body.action === "map-reverse") {
+      if (!isCoordinate(body.lat) || !isCoordinate(body.lon) || body.lat > 90 || body.lat < -90) {
+        return jsonResponse({ error: "위치 좌표가 올바르지 않아요." }, 400, corsHeaders);
+      }
+      if (!mapsConfigured()) return jsonResponse({ available: false }, 200, corsHeaders);
+      const payload = await naverMaps("/map-reversegeocode/v2/gc", {
+        coords: `${body.lon},${body.lat}`,
+        sourcecrs: "epsg:4326",
+        orders: "legalcode,admcode",
+        output: "json",
+      });
+      return jsonResponse({ available: true, address: reverseAddressFields(payload) }, 200, corsHeaders);
+    }
     if (body.action === "search") {
       const query = typeof body.query === "string" ? body.query.trim() : "";
       if (!query || query.length > 80) {

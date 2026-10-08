@@ -39,6 +39,7 @@
 
   function cityLabel(city) {
     if (city.country === "KR") {
+      if (city.address) return city.address;
       const dong = city.legal_dong || city.administrative_dong || (city.name !== city.parent && city.name !== city.district ? city.name : "");
       const parts = [city.region, city.parent, city.district, dong].filter(Boolean);
       if (parts.length) {
@@ -182,6 +183,16 @@
       const queuedCache = localitySearchCache.get(cacheKey);
       if (queuedCache) return queuedCache;
 
+      try {
+        const result = await callWeatherFunction({ action: "map-geocode", query: norm });
+        if (result.available && Array.isArray(result.cities) && result.cities.length) {
+          localitySearchCache.set(cacheKey, result.cities);
+          return result.cities;
+        }
+      } catch (error) {
+        console.warn("Naver Maps address search failed; using the existing address search.", error);
+      }
+
       const searchTerms = [];
       if (/[동리읍면구군시]$/.test(norm)) {
         searchTerms.push(norm);
@@ -276,6 +287,19 @@
       const request = addressQueue.then(async () => {
         const queuedCache = addressCache.get(cacheKey);
         if (queuedCache) return queuedCache;
+        try {
+          const result = await callWeatherFunction({
+            action: "map-reverse",
+            lat: Number(city.lat),
+            lon: Number(city.lon),
+          });
+          if (result.available && result.address && Object.values(result.address).some(Boolean)) {
+            addressCache.set(cacheKey, result.address);
+            return result.address;
+          }
+        } catch (error) {
+          console.warn("Naver Maps reverse geocoding failed; using the existing address lookup.", error);
+        }
         const delay = 1100 - (Date.now() - lastAddressRequestAt);
         if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
         lastAddressRequestAt = Date.now();
