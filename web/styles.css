@@ -67,18 +67,18 @@ h1 { margin: 12px 0 8px; color: #123d5c; font-size: clamp(27px, 4vw, 40px); lett
   align-items: center;
   min-height: 58px;
   padding: 0 8px 0 18px;
-  border: 2px solid #03c75a;
+  border: 1px solid #bed7e5;
   border-radius: 12px;
   background: #fff;
-  transition: box-shadow .15s ease;
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
-.search-box:focus-within { box-shadow: 0 2px 10px rgba(3, 199, 90, .16); }
+.search-box:focus-within { border-color: #1680b3; box-shadow: 0 0 0 3px rgba(22,128,179,.12); }
 .search-icon {
   width: 21px;
   height: 21px;
   flex: 0 0 auto;
   fill: none;
-  stroke: #03b954;
+  stroke: #1680b3;
   stroke-width: 2.4;
   stroke-linecap: round;
 }
@@ -96,7 +96,7 @@ h1 { margin: 12px 0 8px; color: #123d5c; font-size: clamp(27px, 4vw, 40px); lett
 .search-box input:focus { box-shadow: none; }
 .search-box input::placeholder { color: #87949d; }
 .search-box input::-webkit-search-cancel-button { display: none; }
-.city-picker:focus { border-color: #03c75a; box-shadow: 0 0 0 3px rgba(3,199,90,.12); }
+.city-picker:focus { border-color: #1680b3; box-shadow: 0 0 0 3px rgba(22,128,179,.12); }
 .clear-search, .search-submit {
   display: grid;
   flex: 0 0 42px;
@@ -110,8 +110,8 @@ h1 { margin: 12px 0 8px; color: #123d5c; font-size: clamp(27px, 4vw, 40px); lett
 }
 .clear-search { font-size: 26px; font-weight: 300; }
 .clear-search:hover { background: #f1f4f5; }
-.search-submit { color: #03b954; }
-.search-submit:hover { background: #edfff4; }
+.search-submit { color: #1680b3; }
+.search-submit:hover { background: #eff8fc; }
 .search-submit svg {
   width: 23px;
   height: 23px;
@@ -149,7 +149,7 @@ h1 { margin: 12px 0 8px; color: #123d5c; font-size: clamp(27px, 4vw, 40px); lett
   text-align: left;
   cursor: pointer;
 }
-.address-suggestion:hover, .address-suggestion[aria-selected="true"] { background: #f3faf5; }
+.address-suggestion:hover, .address-suggestion[aria-selected="true"] { background: #eff8fc; }
 .suggestion-pin { width: 20px; flex: 0 0 auto; color: #7a8990; font-size: 18px; text-align: center; }
 .suggestion-copy { display: grid; min-width: 0; gap: 3px; }
 .suggestion-title, .suggestion-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

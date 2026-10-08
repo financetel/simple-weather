@@ -60,6 +60,20 @@
     return [city.name, city.state, country].filter(Boolean).join(", ");
   }
 
+  function mergeAddressSuggestions(localMatches, addressMatches) {
+    const merged = [];
+    const labels = new Set();
+    const add = (city) => {
+      const label = String(city.address || cityLabel(city)).toLocaleLowerCase("ko-KR").replace(/\s+/g, " ").trim();
+      if (labels.has(label)) return;
+      labels.add(label);
+      merged.push(city);
+    };
+    localMatches.forEach(add);
+    addressMatches.forEach(add);
+    return merged;
+  }
+
   function hideAddressSuggestions() {
     window.clearTimeout(suggestionTimer);
     suggestionRequestId += 1;
@@ -73,7 +87,7 @@
 
   function renderAddressSuggestions(cities, emptyMessage = "") {
     suggestionList.replaceChildren();
-    suggestionCities = cities.slice(0, 7);
+    suggestionCities = cities.slice(0, 100);
     activeSuggestionIndex = -1;
     queryInput.removeAttribute("aria-activedescendant");
 
@@ -155,9 +169,11 @@
         const result = await callWeatherFunction({ action: "map-geocode", query: normalized });
         if (requestId !== suggestionRequestId || queryInput.value.trim().replace(/\s+/g, " ") !== normalized) return;
         if (result.available && Array.isArray(result.cities) && result.cities.length) {
-          renderAddressSuggestions(result.cities);
+          renderAddressSuggestions(mergeAddressSuggestions(localMatches, result.cities));
         } else if (!localMatches.length) {
           renderAddressSuggestions([], "주소를 찾지 못했어요. 입력 후 검색을 눌러 다시 찾아보세요.");
+        } else {
+          renderAddressSuggestions(localMatches);
         }
       } catch (error) {
         if (requestId !== suggestionRequestId) return;

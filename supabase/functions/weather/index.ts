@@ -117,7 +117,7 @@ async function geocodeKoreanAddress(query: string): Promise<City[]> {
   const payload = await naverMaps("/map-geocode/v2/geocode", {
     query,
     language: "kor",
-    count: "10",
+    count: "100",
   });
   const addresses = Array.isArray(payload.addresses) ? payload.addresses : [];
   const cities: City[] = [];
