@@ -6,10 +6,10 @@
     <meta name="theme-color" content="#eef7fc">
     <meta name="description" content="도시와 동네별 현재 날씨와 5일 예보를 확인하세요.">
     <title>SimpleWeather · 오늘의 날씨</title>
-    <link rel="stylesheet" href="./styles.css?v=8">
+    <link rel="stylesheet" href="./styles.css?v=9">
     <script src="./config.js?v=8"></script>
     <script src="./korean-districts.js?v=8"></script>
-    <script src="./app.js?v=9" defer></script>
+    <script src="./app.js?v=10" defer></script>
   </head>
   <body>
     <main class="page-shell">
@@ -27,10 +27,25 @@
         <p class="intro">도시부터 동네까지 검색하고, 5일 예보를 확인해 보세요.</p>
         <form id="search-form" class="search-form">
           <label class="visually-hidden" for="city-query">도시 또는 동네 이름</label>
-          <input id="city-query" name="query" type="search" maxlength="80"
-                 placeholder="도시·도·구·동·리 검색  예: 서울, 강남, 역삼동, 부평, 분당"
-                 autocomplete="off" required>
-          <button id="search-button" type="submit"><span aria-hidden="true">⌕</span> 검색</button>
+          <div class="search-box">
+            <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10.8" cy="10.8" r="6.8"></circle>
+              <path d="m16 16 4.2 4.2"></path>
+            </svg>
+            <input id="city-query" name="query" type="search" maxlength="80"
+                   placeholder="장소, 주소 검색  예: 서울시청, 강남구 역삼동"
+                   autocomplete="off" aria-autocomplete="list"
+                   aria-controls="address-suggestions" aria-expanded="false" required>
+            <button id="clear-search" class="clear-search" type="button" aria-label="검색어 지우기" hidden>×</button>
+            <button id="search-button" class="search-submit" type="submit" aria-label="검색">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="10.8" cy="10.8" r="6.8"></circle>
+                <path d="m16 16 4.2 4.2"></path>
+              </svg>
+            </button>
+          </div>
+          <div id="address-suggestions" class="address-suggestions" role="listbox"
+               aria-label="주소 검색 추천" hidden></div>
         </form>
         <div id="city-picker-container" class="city-picker-container" hidden>
           <p id="city-picker-title" class="picker-title">여러 지역이 검색되었습니다. 원하시는 위치를 선택해 주세요:</p>

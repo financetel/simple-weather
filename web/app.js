@@ -5,6 +5,8 @@
   const form = document.querySelector("#search-form");
   const queryInput = document.querySelector("#city-query");
   const searchButton = document.querySelector("#search-button");
+  const clearSearchButton = document.querySelector("#clear-search");
+  const suggestionList = document.querySelector("#address-suggestions");
   const pickerContainer = document.querySelector("#city-picker-container");
   const pickerList = document.querySelector("#city-picker-list");
   const pickerTitle = document.querySelector("#city-picker-title");
@@ -18,6 +20,11 @@
   const regionSearchCache = new Map();
   let addressQueue = Promise.resolve();
   let lastAddressRequestAt = 0;
+  let suggestionCities = [];
+  let activeSuggestionIndex = -1;
+  let suggestionTimer;
+  let suggestionRequestId = 0;
+  let composingQuery = false;
 
   function setStatus(message, isError = false) {
     status.textContent = message;
@@ -51,6 +58,115 @@
     if (city.parent && city.country === "KR") return `${city.parent} ${city.name}, 대한민국`;
     const country = city.country === "KR" ? "대한민국" : city.country;
     return [city.name, city.state, country].filter(Boolean).join(", ");
+  }
+
+  function hideAddressSuggestions() {
+    window.clearTimeout(suggestionTimer);
+    suggestionRequestId += 1;
+    suggestionList.hidden = true;
+    suggestionList.replaceChildren();
+    queryInput.setAttribute("aria-expanded", "false");
+    queryInput.removeAttribute("aria-activedescendant");
+    suggestionCities = [];
+    activeSuggestionIndex = -1;
+  }
+
+  function renderAddressSuggestions(cities, emptyMessage = "") {
+    suggestionList.replaceChildren();
+    suggestionCities = cities.slice(0, 7);
+    activeSuggestionIndex = -1;
+    queryInput.removeAttribute("aria-activedescendant");
+
+    suggestionCities.forEach((city, index) => {
+      const option = el("button", "address-suggestion");
+      option.type = "button";
+      option.id = `address-suggestion-${index}`;
+      option.setAttribute("role", "option");
+      option.setAttribute("aria-selected", "false");
+
+      const pin = el("span", "suggestion-pin", "⌖");
+      pin.setAttribute("aria-hidden", "true");
+      const copy = el("span", "suggestion-copy");
+      const title = city.address || cityLabel(city);
+      const detail = [city.region, city.parent, city.district, city.legal_dong || city.administrative_dong]
+        .filter(Boolean)
+        .filter((part, partIndex, parts) => parts.findIndex((value) => value.toLocaleLowerCase("ko-KR") === part.toLocaleLowerCase("ko-KR")) === partIndex)
+        .join(" ");
+      copy.append(el("span", "suggestion-title", title));
+      if (detail && detail !== title) copy.append(el("span", "suggestion-detail", detail));
+      option.append(pin, copy);
+      option.addEventListener("pointerdown", (event) => event.preventDefault());
+      option.addEventListener("click", () => {
+        queryInput.value = city.address || cityLabel(city);
+        clearSearchButton.hidden = !queryInput.value;
+        hideAddressSuggestions();
+        selectCity(city);
+      });
+      suggestionList.append(option);
+    });
+
+    if (!suggestionCities.length && emptyMessage) {
+      suggestionList.append(el("p", "suggestion-empty", emptyMessage));
+    }
+    suggestionList.hidden = !suggestionCities.length && !emptyMessage;
+    queryInput.setAttribute("aria-expanded", String(!suggestionList.hidden));
+  }
+
+  function setActiveSuggestion(index) {
+    if (!suggestionCities.length) return;
+    activeSuggestionIndex = (index + suggestionCities.length) % suggestionCities.length;
+    const options = suggestionList.querySelectorAll('[role="option"]');
+    options.forEach((option, optionIndex) => {
+      const selected = optionIndex === activeSuggestionIndex;
+      option.setAttribute("aria-selected", String(selected));
+      if (selected) {
+        queryInput.setAttribute("aria-activedescendant", option.id);
+        option.scrollIntoView({ block: "nearest" });
+      }
+    });
+  }
+
+  function chooseActiveSuggestion() {
+    if (activeSuggestionIndex < 0 || !suggestionCities[activeSuggestionIndex]) return false;
+    const city = suggestionCities[activeSuggestionIndex];
+    queryInput.value = city.address || cityLabel(city);
+    clearSearchButton.hidden = !queryInput.value;
+    hideAddressSuggestions();
+    selectCity(city);
+    return true;
+  }
+
+  function updateAddressSuggestions(query) {
+    window.clearTimeout(suggestionTimer);
+    const requestId = ++suggestionRequestId;
+    const normalized = query.trim().replace(/\s+/g, " ");
+    if (normalized.length < 2 || composingQuery) {
+      hideAddressSuggestions();
+      return;
+    }
+
+    const localMatches = typeof window.findKoreanDistricts === "function"
+      ? window.findKoreanDistricts(normalized)
+      : [];
+    renderAddressSuggestions(localMatches);
+
+    suggestionTimer = window.setTimeout(async () => {
+      try {
+        const result = await callWeatherFunction({ action: "map-geocode", query: normalized });
+        if (requestId !== suggestionRequestId || queryInput.value.trim().replace(/\s+/g, " ") !== normalized) return;
+        if (result.available && Array.isArray(result.cities) && result.cities.length) {
+          renderAddressSuggestions(result.cities);
+        } else if (!localMatches.length) {
+          renderAddressSuggestions([], "주소를 찾지 못했어요. 입력 후 검색을 눌러 다시 찾아보세요.");
+        }
+      } catch (error) {
+        if (requestId !== suggestionRequestId) return;
+        console.warn("Address suggestions could not be loaded.", error);
+        if (!localMatches.length) {
+          renderAddressSuggestions([], "주소 추천을 불러오지 못했어요. 입력 후 검색해 주세요.");
+        }
+      }
+    }, 350);
   }
 
   function wmoWeatherToOpenWeather(code) {
@@ -146,6 +262,9 @@
     const baseUrl = String(config.supabaseUrl || "").replace(/\/+$/, "");
     const apiKey = String(config.supabaseApiKey || "");
     if (!baseUrl || !apiKey) {
+      if (payload.action === "map-geocode" || payload.action === "map-reverse") {
+        return { available: false };
+      }
       return fetchLocalWeatherFallback(payload);
     }
     let response;
@@ -608,11 +727,53 @@
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
+    hideAddressSuggestions();
     const query = queryInput.value.trim();
     if (!query) {
       setStatus("먼저 도시 또는 동네 이름을 입력해 주세요.", true);
       return;
     }
     searchCities(query);
+  });
+
+  queryInput.addEventListener("input", () => {
+    clearSearchButton.hidden = !queryInput.value;
+    updateAddressSuggestions(queryInput.value);
+  });
+
+  queryInput.addEventListener("compositionstart", () => {
+    composingQuery = true;
+    window.clearTimeout(suggestionTimer);
+  });
+
+  queryInput.addEventListener("compositionend", () => {
+    composingQuery = false;
+    updateAddressSuggestions(queryInput.value);
+  });
+
+  queryInput.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" && !suggestionList.hidden) {
+      event.preventDefault();
+      setActiveSuggestion(activeSuggestionIndex + 1);
+    } else if (event.key === "ArrowUp" && !suggestionList.hidden) {
+      event.preventDefault();
+      setActiveSuggestion(activeSuggestionIndex < 0 ? suggestionCities.length - 1 : activeSuggestionIndex - 1);
+    } else if (event.key === "Enter" && chooseActiveSuggestion()) {
+      event.preventDefault();
+    } else if (event.key === "Escape" && !suggestionList.hidden) {
+      event.preventDefault();
+      hideAddressSuggestions();
+    }
+  });
+
+  clearSearchButton.addEventListener("click", () => {
+    queryInput.value = "";
+    clearSearchButton.hidden = true;
+    hideAddressSuggestions();
+    queryInput.focus();
+  });
+
+  document.addEventListener("pointerdown", (event) => {
+    if (!form.contains(event.target)) hideAddressSuggestions();
   });
 })();
