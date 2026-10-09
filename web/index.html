@@ -4,12 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#eef7fc">
-    <meta name="description" content="도시와 동네별 현재 날씨와 5일 예보를 확인하세요.">
+    <meta name="description" content="대한민국 행정구역별 현재 날씨와 5일 예보를 확인하세요.">
     <title>SimpleWeather · 오늘의 날씨</title>
     <link rel="stylesheet" href="./styles.css?v=10">
     <script src="./config.js?v=8"></script>
-    <script src="./korean-districts.js?v=8"></script>
-    <script src="./app.js?v=11" defer></script>
+    <script src="./korean-administrative-areas.js?v=1"></script>
+    <script src="./app.js?v=12" defer></script>
   </head>
   <body>
     <main class="page-shell">
@@ -23,17 +23,17 @@
 
       <section class="search-panel" aria-labelledby="page-title">
         <div class="eyebrow">YOUR LOCAL FORECAST</div>
-        <h1 id="page-title">오늘 날씨가 궁금한가요?</h1>
-        <p class="intro">도시부터 동네까지 검색하고, 5일 예보를 확인해 보세요.</p>
+        <h1 id="page-title">우리 동네 날씨를 확인해 보세요</h1>
+        <p class="intro">시·군·구부터 읍·면·동까지 선택해 현재 날씨와 5일 예보를 확인할 수 있어요.</p>
         <form id="search-form" class="search-form">
-          <label class="visually-hidden" for="city-query">도시 또는 동네 이름</label>
+          <label class="visually-hidden" for="city-query">대한민국 행정구역</label>
           <div class="search-box">
             <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="10.8" cy="10.8" r="6.8"></circle>
               <path d="m16 16 4.2 4.2"></path>
             </svg>
             <input id="city-query" name="query" type="search" maxlength="80"
-                   placeholder="장소, 주소 검색  예: 서울시청, 강남구 역삼동"
+                   placeholder="행정구역 검색  예: 서울특별시 강동구 천호동"
                    autocomplete="off" aria-autocomplete="list"
                    aria-controls="address-suggestions" aria-expanded="false" required>
             <button id="clear-search" class="clear-search" type="button" aria-label="검색어 지우기" hidden>×</button>
@@ -45,21 +45,21 @@
             </button>
           </div>
           <div id="address-suggestions" class="address-suggestions" role="listbox"
-               aria-label="주소 검색 추천" hidden></div>
+               aria-label="행정구역 검색 추천" hidden></div>
         </form>
         <div id="city-picker-container" class="city-picker-container" hidden>
-          <p id="city-picker-title" class="picker-title">여러 지역이 검색되었습니다. 원하시는 위치를 선택해 주세요:</p>
-          <div id="city-picker-list" class="city-picker-list" role="listbox" aria-label="검색된 위치 목록"></div>
+          <p id="city-picker-title" class="picker-title">여러 행정구역이 검색되었습니다. 원하시는 지역을 선택해 주세요:</p>
+          <div id="city-picker-list" class="city-picker-list" role="listbox" aria-label="검색된 행정구역 목록"></div>
         </div>
         <select id="city-picker" class="city-picker" hidden></select>
-        <p id="status" class="status" role="status" aria-live="polite">도시를 검색해 현재 날씨와 예보를 확인해 보세요.</p>
+        <p id="status" class="status" role="status" aria-live="polite">시·도, 시·군·구, 읍·면·동을 검색해 보세요.</p>
       </section>
 
       <section id="weather-content" class="weather-content" aria-live="polite"></section>
 
       <footer class="footer">
         <span>날씨 데이터: OpenWeather</span>
-        <span>주소 검색: NAVER Cloud Maps · © OpenStreetMap contributors</span>
+        <span>행정구역 좌표: 제공된 대한민국 행정구역 데이터</span>
       </footer>
     </main>
   </body>

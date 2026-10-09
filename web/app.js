@@ -15,16 +15,43 @@
   const content = document.querySelector("#weather-content");
 
   let pendingCities = [];
-  const addressCache = new Map();
-  const localitySearchCache = new Map();
-  const regionSearchCache = new Map();
-  let addressQueue = Promise.resolve();
-  let lastAddressRequestAt = 0;
   let suggestionCities = [];
   let activeSuggestionIndex = -1;
-  let suggestionTimer;
-  let suggestionRequestId = 0;
   let composingQuery = false;
+
+  const koreanAreas = (Array.isArray(window.KOREAN_ADMINISTRATIVE_AREAS)
+    ? window.KOREAN_ADMINISTRATIVE_AREAS
+    : []).map(([address, lat, lon]) => {
+      const parts = address.split(" ");
+      return {
+        address,
+        lat,
+        lon,
+        parts,
+        normalized: normalizeText(address),
+        normalizedParts: parts.map(normalizeAreaPart),
+      };
+    });
+
+  function normalizeText(text) {
+    return String(text || "")
+      .toLocaleLowerCase("ko-KR")
+      .trim()
+      .replace(/\s+/g, " ");
+  }
+
+  function normalizeAreaPart(text) {
+    const part = normalizeText(text).replace(/(특별자치도|특별자치시|특별시|광역시|자치도|자치시|도|시|구|군|읍|면|동|리)$/u, "");
+    const aliases = {
+      "충북": "충청북",
+      "충남": "충청남",
+      "전북": "전라북",
+      "전남": "전라남",
+      "경북": "경상북",
+      "경남": "경상남",
+    };
+    return aliases[part] || part;
+  }
 
   function setStatus(message, isError = false) {
     status.textContent = message;
@@ -45,38 +72,73 @@
   }
 
   function cityLabel(city) {
-    if (city.country === "KR") {
-      if (city.address) return city.address;
-      const dong = city.legal_dong || city.administrative_dong || (city.name !== city.parent && city.name !== city.district ? city.name : "");
-      const parts = [city.region, city.parent, city.district, dong].filter(Boolean);
-      if (parts.length) {
-        return [...new Set(parts.map((p) => p.toLocaleLowerCase("ko-KR").replace(/\s+/g, " ").trim()))]
-          .map((norm) => parts.find((p) => p.toLocaleLowerCase("ko-KR").replace(/\s+/g, " ").trim() === norm))
-          .join(" ");
-      }
-    }
-    if (city.parent && city.country === "KR") return `${city.parent} ${city.name}, 대한민국`;
+    if (city.country === "KR" && city.address) return city.address;
     const country = city.country === "KR" ? "대한민국" : city.country;
     return [city.name, city.state, country].filter(Boolean).join(", ");
   }
 
-  function mergeAddressSuggestions(localMatches, addressMatches) {
-    const merged = [];
-    const labels = new Set();
-    const add = (city) => {
-      const label = String(city.address || cityLabel(city)).toLocaleLowerCase("ko-KR").replace(/\s+/g, " ").trim();
-      if (labels.has(label)) return;
-      labels.add(label);
-      merged.push(city);
+  function areaToCity(area) {
+    const parts = area.address.split(" ");
+    return {
+      name: parts[parts.length - 1],
+      address: area.address,
+      country: "KR",
+      state: "",
+      region: parts[0] || "",
+      parent: parts[1] || "",
+      district: parts[2] || "",
+      legal_dong: parts[parts.length - 1] || "",
+      lat: area.lat,
+      lon: area.lon,
     };
-    localMatches.forEach(add);
-    addressMatches.forEach(add);
-    return merged;
+  }
+
+  function findKoreanAdministrativeAreas(query) {
+    const normalized = normalizeText(query);
+    if (!normalized) return [];
+    const queryParts = normalized.split(" ").map(normalizeAreaPart);
+    const matches = [];
+
+    for (const area of koreanAreas) {
+      let rank = Infinity;
+      if (area.normalized === normalized) {
+        rank = 0;
+      } else if (queryParts.length === 1) {
+        if (area.normalizedParts.at(-1) === queryParts[0]) rank = 1;
+        else if (area.normalizedParts.includes(queryParts[0])) rank = 2;
+        else if (area.normalizedParts.at(-1).startsWith(queryParts[0])) rank = 3;
+        else if (area.normalizedParts.some((part) => part.startsWith(queryParts[0]))) rank = 4;
+      } else {
+        for (let i = 0; i <= area.normalizedParts.length - queryParts.length; i += 1) {
+          if (queryParts.every((part, offset) => area.normalizedParts[i + offset] === part)) {
+            rank = i === 0 ? 1 : 2;
+            break;
+          }
+          const finalPart = area.normalizedParts[i + queryParts.length - 1];
+          if (i + queryParts.length === area.normalizedParts.length
+              && queryParts.slice(0, -1).every((part, offset) => area.normalizedParts[i + offset] === part)
+              && finalPart.startsWith(queryParts.at(-1))) {
+            rank = i === 0 ? 3 : 4;
+            break;
+          }
+        }
+        if (rank === Infinity && queryParts.every((part) => area.normalizedParts.includes(part))) rank = 3;
+      }
+      if (rank !== Infinity) matches.push({ area, rank });
+    }
+
+    if (!matches.length) return [];
+    matches.sort((a, b) => a.rank - b.rank || a.area.parts.length - b.area.parts.length
+      || a.area.address.localeCompare(b.area.address, "ko-KR"));
+    const bestRank = matches[0].rank;
+    return matches
+      .filter(({ area, rank }) => rank === bestRank
+        && (queryParts.length === 1 && rank === 1 || area.parts.length === matches[0].area.parts.length))
+      .slice(0, 100)
+      .map(({ area }) => areaToCity(area));
   }
 
   function hideAddressSuggestions() {
-    window.clearTimeout(suggestionTimer);
-    suggestionRequestId += 1;
     suggestionList.hidden = true;
     suggestionList.replaceChildren();
     queryInput.setAttribute("aria-expanded", "false");
@@ -87,7 +149,7 @@
 
   function renderAddressSuggestions(cities, emptyMessage = "") {
     suggestionList.replaceChildren();
-    suggestionCities = cities.slice(0, 100);
+    suggestionCities = cities.slice(0, 30);
     activeSuggestionIndex = -1;
     queryInput.removeAttribute("aria-activedescendant");
 
@@ -97,18 +159,9 @@
       option.id = `address-suggestion-${index}`;
       option.setAttribute("role", "option");
       option.setAttribute("aria-selected", "false");
-
-      const pin = el("span", "suggestion-pin", "⌖");
-      pin.setAttribute("aria-hidden", "true");
       const copy = el("span", "suggestion-copy");
-      const title = city.address || cityLabel(city);
-      const detail = [city.region, city.parent, city.district, city.legal_dong || city.administrative_dong]
-        .filter(Boolean)
-        .filter((part, partIndex, parts) => parts.findIndex((value) => value.toLocaleLowerCase("ko-KR") === part.toLocaleLowerCase("ko-KR")) === partIndex)
-        .join(" ");
-      copy.append(el("span", "suggestion-title", title));
-      if (detail && detail !== title) copy.append(el("span", "suggestion-detail", detail));
-      option.append(pin, copy);
+      copy.append(el("span", "suggestion-title", cityLabel(city)));
+      option.append(copy);
       option.addEventListener("pointerdown", (event) => event.preventDefault());
       option.addEventListener("click", () => {
         queryInput.value = city.address || cityLabel(city);
@@ -151,38 +204,13 @@
   }
 
   function updateAddressSuggestions(query) {
-    window.clearTimeout(suggestionTimer);
-    const requestId = ++suggestionRequestId;
     const normalized = query.trim().replace(/\s+/g, " ");
     if (normalized.length < 2 || composingQuery) {
       hideAddressSuggestions();
       return;
     }
-
-    const localMatches = typeof window.findKoreanDistricts === "function"
-      ? window.findKoreanDistricts(normalized)
-      : [];
-    renderAddressSuggestions(localMatches);
-
-    suggestionTimer = window.setTimeout(async () => {
-      try {
-        const result = await callWeatherFunction({ action: "map-geocode", query: normalized });
-        if (requestId !== suggestionRequestId || queryInput.value.trim().replace(/\s+/g, " ") !== normalized) return;
-        if (result.available && Array.isArray(result.cities) && result.cities.length) {
-          renderAddressSuggestions(mergeAddressSuggestions(localMatches, result.cities));
-        } else if (!localMatches.length) {
-          renderAddressSuggestions([], "주소를 찾지 못했어요. 입력 후 검색을 눌러 다시 찾아보세요.");
-        } else {
-          renderAddressSuggestions(localMatches);
-        }
-      } catch (error) {
-        if (requestId !== suggestionRequestId) return;
-        console.warn("Address suggestions could not be loaded.", error);
-        if (!localMatches.length) {
-          renderAddressSuggestions([], "주소 추천을 불러오지 못했어요. 입력 후 검색해 주세요.");
-        }
-      }
-    }, 350);
+    const matches = findKoreanAdministrativeAreas(normalized);
+    renderAddressSuggestions(matches, matches.length ? "" : "일치하는 행정구역을 찾지 못했어요.");
   }
 
   function wmoWeatherToOpenWeather(code) {
@@ -277,12 +305,8 @@
   async function callWeatherFunction(payload) {
     const baseUrl = String(config.supabaseUrl || "").replace(/\/+$/, "");
     const apiKey = String(config.supabaseApiKey || "");
-    if (!baseUrl || !apiKey) {
-      if (payload.action === "map-geocode" || payload.action === "map-reverse") {
-        return { available: false };
-      }
-      return fetchLocalWeatherFallback(payload);
-    }
+    if (!baseUrl || !apiKey) return fetchLocalWeatherFallback(payload);
+
     let response;
     try {
       response = await fetch(`${baseUrl}/functions/v1/weather`, {
@@ -308,177 +332,6 @@
     return result;
   }
 
-  async function searchKoreanLocalities(query) {
-    const norm = query.trim().replace(/\s+/g, " ");
-    const cacheKey = norm;
-    const cached = localitySearchCache.get(cacheKey);
-    if (cached) return cached;
-
-    const request = addressQueue.then(async () => {
-      const queuedCache = localitySearchCache.get(cacheKey);
-      if (queuedCache) return queuedCache;
-
-      try {
-        const result = await callWeatherFunction({ action: "map-geocode", query: norm });
-        if (result.available && Array.isArray(result.cities) && result.cities.length) {
-          localitySearchCache.set(cacheKey, result.cities);
-          return result.cities;
-        }
-      } catch (error) {
-        console.warn("Naver Maps address search failed; using the existing address search.", error);
-      }
-
-      const searchTerms = [];
-      if (/[동리읍면구군시]$/.test(norm)) {
-        searchTerms.push(norm);
-      } else {
-        searchTerms.push(`${norm}동`, `${norm}구`, norm);
-      }
-
-      const cities = [];
-
-      for (const term of searchTerms) {
-        const delay = 1100 - (Date.now() - lastAddressRequestAt);
-        if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
-        lastAddressRequestAt = Date.now();
-
-        const url = new URL("https://nominatim.openstreetmap.org/search");
-        url.search = new URLSearchParams({
-          q: `${term}, 대한민국`,
-          format: "jsonv2",
-          addressdetails: "1",
-          countrycodes: "kr",
-          limit: "10",
-        }).toString();
-
-        let response;
-        try {
-          response = await fetch(url, {
-            headers: { "Accept-Language": "ko" },
-            signal: AbortSignal.timeout(15000),
-          });
-        } catch {
-          continue;
-        }
-        if (!response.ok) continue;
-
-        const results = await response.json();
-        if (!Array.isArray(results)) continue;
-
-        for (const result of results) {
-          const values = result.address && typeof result.address === "object" ? result.address : {};
-          const lat = Number(result.lat);
-          const lon = Number(result.lon);
-          if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-
-          const dong = values.quarter || values.suburb || values.neighbourhood || values.village || (/[동리읍면]$/.test(result.name) ? result.name : "");
-          const district = values.borough || values.city_district || values.district || values.county || "";
-          const parent = values.city || values.town || values.municipality || "";
-          const region = values.province || values.state || "";
-
-          const city = {
-            name: dong || result.name || term,
-            country: "KR",
-            state: "",
-            lat,
-            lon,
-            region,
-            parent,
-            district,
-            administrative_dong: values.suburb || "",
-            legal_dong: dong,
-          };
-
-          const label = cityLabel(city);
-          const duplicate = cities.some((c) => cityLabel(c) === label
-            || (Math.abs(c.lat - lat) < 0.005 && Math.abs(c.lon - lon) < 0.005));
-
-          if (!duplicate) {
-            cities.push(city);
-          }
-        }
-
-        if (cities.length > 0 && /[동리읍면]$/.test(norm)) {
-          break;
-        }
-      }
-
-      localitySearchCache.set(cacheKey, cities);
-      return cities;
-    });
-
-    addressQueue = request.then(() => undefined, () => undefined);
-    return request;
-  }
-
-  async function resolveKoreanAddress(city) {
-    if (city.country !== "KR") return city;
-    const needsAddress = Boolean(city.address_warning)
-      || (/[동리]$/.test(city.name) && (!city.parent || !city.district));
-    if (!needsAddress) return city;
-    const cacheKey = `${Number(city.lat).toFixed(5)},${Number(city.lon).toFixed(5)}`;
-    let address = addressCache.get(cacheKey);
-    if (!address) {
-      const request = addressQueue.then(async () => {
-        const queuedCache = addressCache.get(cacheKey);
-        if (queuedCache) return queuedCache;
-        try {
-          const result = await callWeatherFunction({
-            action: "map-reverse",
-            lat: Number(city.lat),
-            lon: Number(city.lon),
-          });
-          if (result.available && result.address && Object.values(result.address).some(Boolean)) {
-            addressCache.set(cacheKey, result.address);
-            return result.address;
-          }
-        } catch (error) {
-          console.warn("Naver Maps reverse geocoding failed; using the existing address lookup.", error);
-        }
-        const delay = 1100 - (Date.now() - lastAddressRequestAt);
-        if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
-        lastAddressRequestAt = Date.now();
-        const url = new URL("https://nominatim.openstreetmap.org/reverse");
-        url.search = new URLSearchParams({
-          lat: String(city.lat),
-          lon: String(city.lon),
-          format: "jsonv2",
-          zoom: "18",
-          addressdetails: "1",
-        }).toString();
-        const response = await fetch(url, {
-          headers: { "Accept-Language": "ko" },
-          signal: AbortSignal.timeout(15000),
-        });
-        if (!response.ok) throw new Error(`Nominatim returned ${response.status}.`);
-        const result = await response.json();
-        if (!result.address || typeof result.address !== "object") {
-          throw new Error("Nominatim did not return address details.");
-        }
-        const values = result.address;
-        const resolved = {
-          region: values.province || values.state || "",
-          parent: values.city || values.town || values.municipality || "",
-          district: values.borough || values.city_district || values.district || "",
-          administrative_dong: values.suburb || values.city_block || "",
-          legal_dong: values.quarter || values.neighbourhood || "",
-        };
-        addressCache.set(cacheKey, resolved);
-        return resolved;
-      });
-      addressQueue = request.then(() => undefined, () => undefined);
-      try {
-        address = await request;
-      } catch (error) {
-        console.warn("Browser-side Korean address lookup failed.", error);
-        return city;
-      }
-    }
-    Object.assign(city, address);
-    delete city.address_warning;
-    return city;
-  }
-
   function hideCandidatePicker() {
     if (pickerContainer) pickerContainer.hidden = true;
     if (picker) picker.hidden = true;
@@ -490,7 +343,7 @@
 
     pickerList.replaceChildren();
     if (pickerTitle) {
-      pickerTitle.textContent = `여러 위치가 검색되었습니다 (${cities.length}곳). 원하시는 위치를 선택해 주세요:`;
+      pickerTitle.textContent = `여러 행정구역이 검색되었습니다 (${cities.length}곳). 원하시는 지역을 선택해 주세요:`;
     }
 
     cities.forEach((city, index) => {
@@ -531,12 +384,12 @@
   function selectCity(city) {
     hideCandidatePicker();
     setBusy(true, `${cityLabel(city)} 날씨를 불러오고 있어요…`);
-    return resolveKoreanAddress(city)
-      .then((resolvedCity) => callWeatherFunction({
-        action: "weather",
-        lat: resolvedCity.lat,
-        lon: resolvedCity.lon,
-      }).then((weather) => renderWeather(resolvedCity, weather)))
+    return callWeatherFunction({
+      action: "weather",
+      lat: city.lat,
+      lon: city.lon,
+    })
+      .then((weather) => renderWeather(city, weather))
       .catch((error) => setStatus(error.message, true))
       .finally(() => setBusy(false));
   }
@@ -544,62 +397,28 @@
   async function searchCities(query) {
     hideCandidatePicker();
     content.replaceChildren();
-    setBusy(true, `‘${query}’ 위치를 찾고 있어요…`);
+    setBusy(true, `‘${query}’ 행정구역을 찾고 있어요…`);
 
-    const normalized = query.trim().replace(/\s+/g, " ");
-
-    // 1단계: 내장 대한민국 행정구역 DB 탐색
-    let localMatches = [];
-    if (typeof window.findKoreanDistricts === "function") {
-      localMatches = window.findKoreanDistricts(normalized);
-    }
-
-    const isSpecificDong = /[동리읍면]$/.test(normalized) || /\s+[^\s]+[동리읍면]$/.test(normalized);
-
-    if (localMatches.length === 1 && !isSpecificDong) {
+    const localMatches = findKoreanAdministrativeAreas(query);
+    if (localMatches.length === 1) {
       setBusy(false);
       return selectCity(localMatches[0]);
     }
-
-    if (localMatches.length > 1 && !isSpecificDong) {
+    if (localMatches.length > 1) {
       setBusy(false);
       return showCandidatePicker(localMatches);
     }
 
-    // 2단계: 동/읍/면 또는 세부 주소 Nominatim 지오코딩
-    try {
-      const localityResults = await searchKoreanLocalities(normalized);
-      if (localityResults.length === 1) {
-        setBusy(false);
-        return selectCity(localityResults[0]);
-      }
-      if (localityResults.length > 1) {
-        setBusy(false);
-        return showCandidatePicker(localityResults);
-      }
-    } catch (err) {
-      console.warn("Locality search failed:", err);
-    }
-
-    // 로컬 매칭 결과가 있었던 경우 그것이라도 표시
-    if (localMatches.length > 0) {
-      setBusy(false);
-      if (localMatches.length === 1) return selectCity(localMatches[0]);
-      return showCandidatePicker(localMatches);
-    }
-
-    // 3단계: 해외 도시 및 영문 폴백 (OpenWeather / Open-Meteo)
+    // 대한민국 행정구역 데이터에 없는 검색어는 해외 도시 검색으로 처리합니다.
     try {
       const { cities } = await callWeatherFunction({ action: "search", query });
       setBusy(false);
       pendingCities = Array.isArray(cities) ? cities : [];
       if (!pendingCities.length) {
-        setStatus("위치를 찾지 못했어요. 동·구·시 또는 한글·영문 이름으로 다시 검색해 주세요.", true);
+        setStatus("행정구역을 찾지 못했어요. 시·도, 시·군·구 또는 읍·면·동을 입력해 주세요.", true);
         return;
       }
-      if (pendingCities.length === 1) {
-        return selectCity(pendingCities[0]);
-      }
+      if (pendingCities.length === 1) return selectCity(pendingCities[0]);
       showCandidatePicker(pendingCities);
     } catch (error) {
       setBusy(false);
@@ -643,9 +462,6 @@
       el("h2", "weather-location", cityLabel(city)),
       el("p", "weather-stamp", `${localDate(current.dt, offset, { year: "numeric", month: "long", day: "numeric", weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })} 기준`)
     );
-    if (city.address_warning) {
-      hero.append(el("p", "weather-stamp", city.address_warning));
-    }
     const line = el("div", "current-line");
     line.append(
       el("span", "weather-icon", weatherEmoji(weather)),
@@ -746,7 +562,7 @@
     hideAddressSuggestions();
     const query = queryInput.value.trim();
     if (!query) {
-      setStatus("먼저 도시 또는 동네 이름을 입력해 주세요.", true);
+      setStatus("먼저 행정구역을 입력해 주세요.", true);
       return;
     }
     searchCities(query);
@@ -759,7 +575,6 @@
 
   queryInput.addEventListener("compositionstart", () => {
     composingQuery = true;
-    window.clearTimeout(suggestionTimer);
   });
 
   queryInput.addEventListener("compositionend", () => {
